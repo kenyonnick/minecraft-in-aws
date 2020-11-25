@@ -12,38 +12,40 @@ provider "aws" {
   region  = "us-east-2"
 }
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
+data "aws_ami" "amazon_linux_2" {
+ most_recent = true
 
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
-  }
 
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
+ filter {
+   name   = "owner-alias"
+   values = ["amazon"]
+ }
 
-  owners = ["099720109477"] # Canonical
+
+ filter {
+   name   = "name"
+   values = ["amzn2-ami-hvm*"]
+ }
+
+ owners = ["amazon"]
 }
 
-resource "aws_vpc" "main" {
+resource "aws_vpc" "minecraft_vpc" {
   cidr_block       = "10.0.0.0/16"
   instance_tenancy = "default"
 
   tags = {
-    Name  = "minecraft-vpc",
+    Name  = "minecraft_vpc",
     Stack = var.stack
   }
 }
 
-resource "aws_subnet" "main" {
-  vpc_id     = aws_vpc.main.id
+resource "aws_subnet" "minecraft_subnet" {
+  vpc_id     = aws_vpc.minecraft_vpc.id
   cidr_block = "10.0.1.0/24"
 
   tags = {
-    Name = "minecraft-subnet",
+    Name  = "minecraft_subnet",
     Stack = var.stack
   }
 }
@@ -51,7 +53,7 @@ resource "aws_subnet" "main" {
 resource "aws_security_group" "minecraft_sg" {
   name        = "allow_tls"
   description = "Allow TLS inbound traffic"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = aws_vpc.minecraft_vpc.id
 
   ingress {
     description = "TLS from VPC"
@@ -83,29 +85,74 @@ resource "aws_security_group" "minecraft_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   tags = {
-    Name  = "Minecraft Security Group",
+    Name  = "minecraft_sg",
     Stack = var.stack
   }
 }
 
-resource "aws_instance" "minecraft-server" {
-  ami                  = data.aws_ami.ubuntu.id
-  instance_type        = "t3.medium"
-  key_name             = "minecraft-admin"
-  iam_instance_profile = "minecraft-vanilla-ec2-to-s3"
+resource "aws_eip" "minecraft_elastic_ip" {
+  instance = aws_instance.minecraft_server.id
+  vpc      = true
+
+  tags = {
+    Name  = "minecraft_elastic_ip",
+    Stack = var.stack
+  }
+}
+
+resource "aws_internet_gateway" "minecraft_gateway" {
+  vpc_id = aws_vpc.minecraft_vpc.id
+
+  tags = {
+    Name  = "minecraft_gateway",
+    Stack = var.stack
+  }
+}
+
+resource "aws_route_table" "minecraft_route_table" {
+  vpc_id = aws_vpc.minecraft_vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.minecraft_gateway.id
+  }
+
+  tags = {
+    Name  = "minecraft_route_table",
+    Stack = var.stack
+  }
+}
+
+resource "aws_route_table_association" "subnet_association" {
+  subnet_id      = aws_subnet.minecraft_subnet.id
+  route_table_id = aws_route_table.minecraft_route_table.id
+}
+
+resource "aws_instance" "minecraft_server" {
+  ami                         = data.aws_ami.amazon_linux_2.id
+  instance_type               = "t3.medium"
+  key_name                    = "minecraft-admin"
+  iam_instance_profile        = "minecraft-vanilla-ec2-to-s3"
   associate_public_ip_address = true
 
   vpc_security_group_ids = [aws_security_group.minecraft_sg.id]
 
-  subnet_id = aws_subnet.main.id
+  subnet_id = aws_subnet.minecraft_subnet.id
 
   root_block_device {
     volume_size = "8"
   }
 
   tags = {
-    Name  = "Minecraft Server",
+    Name  = "minecraft_server",
     Stack = var.stack
   }
 }
